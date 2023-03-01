@@ -1,8 +1,8 @@
-# BybitTriangularArbitrage v1
+# KucoinTriangularArbitrage v1
 
 ## v1.0 | Faster than REST API | Socket API | Live Updates
 
-This is the new version of Bybit Spot Triangular Arbitrage Finder.
+This is the new version of Kucoin Triangular Arbitrage Finder.
 
 ### Key Features
 

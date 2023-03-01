@@ -11,76 +11,92 @@ let pairs = [],
 
 const eventEmitter = new events();
 
+const formatPair = (b, q) => b + "-" + q;
+
 const getPairs = async () => {
-  const resp = await got("https://api.bybit.com/spot/v3/public/symbols");
+  const resp = await got("https://api.kucoin.com/api/v2/symbols");
   const eInfo = JSON.parse(resp.body);
   const symbols = [
-    ...new Set(eInfo.result.list.map((d) => [d.baseCoin, d.quoteCoin]).flat()),
+    ...new Set(
+      eInfo.data
+        .filter((d) => d.enableTrading)
+        .map((d) => [d.baseCurrency, d.quoteCurrency])
+        .flat()
+    ),
   ];
-  const validPairs = eInfo.result.list.map((d) => d.name);
+  const validPairs = eInfo.data
+    .filter((d) => d.enableTrading)
+    .map((d) => d.symbol);
   validPairs.forEach((symbol) => {
     symValJ[symbol] = { bidPrice: 0, askPrice: 0 };
   });
 
-  let s1 = symbols,
-    s2 = symbols,
-    s3 = symbols;
-  s1.forEach((d1) => {
-    s2.forEach((d2) => {
-      s3.forEach((d3) => {
-        if (!(d1 == d2 || d2 == d3 || d3 == d1)) {
-          let lv1 = [],
-            lv2 = [],
-            lv3 = [],
-            l1 = "",
-            l2 = "",
-            l3 = "";
-          if (symValJ[d1 + d2]) {
-            lv1.push(d1 + d2);
-            l1 = "num";
-          }
-          if (symValJ[d2 + d1]) {
-            lv1.push(d2 + d1);
-            l1 = "den";
-          }
+  validPairs.forEach((p) => {
+    symbols.forEach((d3) => {
+      const [d1, d2] = p.split("-");
+      if (!(d1 == d2 || d2 == d3 || d3 == d1)) {
+        let lv1 = [],
+          lv2 = [],
+          lv3 = [],
+          l1 = "",
+          l2 = "",
+          l3 = "";
 
-          if (symValJ[d2 + d3]) {
-            lv2.push(d2 + d3);
-            l2 = "num";
-          }
-          if (symValJ[d3 + d2]) {
-            lv2.push(d3 + d2);
-            l2 = "den";
-          }
+        const p12 = formatPair(d1, d2);
+        const p21 = formatPair(d2, d1);
 
-          if (symValJ[d3 + d1]) {
-            lv3.push(d3 + d1);
-            l3 = "num";
-          }
-          if (symValJ[d1 + d3]) {
-            lv3.push(d1 + d3);
-            l3 = "den";
-          }
+        const p23 = formatPair(d2, d3);
+        const p32 = formatPair(d3, d2);
 
-          if (lv1.length && lv2.length && lv3.length) {
-            pairs.push({
-              l1: l1,
-              l2: l2,
-              l3: l3,
-              d1: d1,
-              d2: d2,
-              d3: d3,
-              lv1: lv1[0],
-              lv2: lv2[0],
-              lv3: lv3[0],
-              value: -100,
-              tpath: "",
-            });
-          }
+        const p31 = formatPair(d3, d1);
+        const p13 = formatPair(d1, d3);
+
+        if (symValJ[p12]) {
+          lv1.push(p12);
+          l1 = "num";
         }
-      });
+        if (symValJ[p21]) {
+          lv1.push(p21);
+          l1 = "den";
+        }
+
+        if (symValJ[p23]) {
+          lv2.push(p23);
+          l2 = "num";
+        }
+        if (symValJ[p32]) {
+          lv2.push(p32);
+          l2 = "den";
+        }
+
+        if (symValJ[p31]) {
+          lv3.push(p31);
+          l3 = "num";
+        }
+        if (symValJ[p13]) {
+          lv3.push(p13);
+          l3 = "den";
+        }
+
+        if (lv1.length && lv2.length && lv3.length) {
+          pairs.push({
+            l1: l1,
+            l2: l2,
+            l3: l3,
+            d1: d1,
+            d2: d2,
+            d3: d3,
+            lv1: lv1[0],
+            lv2: lv2[0],
+            lv3: lv3[0],
+            value: -100,
+            tpath: "",
+          });
+        }
+      }
     });
   });
+
   log(
     `Finished identifying all the paths. Total symbols = ${symbols.length}. Total paths = ${pairs.length}`
   );
@@ -89,13 +105,10 @@ const getPairs = async () => {
 const processData = (pl) => {
   try {
     pl = JSON.parse(pl);
-    // if (pl?.op === "subscribe") {
-    //   console.log(pl);
-    // }
-    const symbol = pl?.topic?.slice(11);
+    const symbol = pl?.subject;
     const { data } = pl;
     if (!data) return;
-    const { bp: bidPrice, ap: askPrice } = data;
+    const { bestBid: bidPrice, bestAsk: askPrice } = data;
     if (!bidPrice && !askPrice) return;
 
     if (bidPrice) symValJ[symbol].bidPrice = bidPrice * 1;
@@ -210,43 +223,67 @@ const processData = (pl) => {
 
 let ws = "";
 let subs = [];
-const wsconnect = () => {
-  ws = new Websocket(`wss://stream.bybit.com/spot/public/v3`);
+let wspingTrigger = "";
+let wsreconnectTrigger = "";
+let wsClientID;
 
-  subs = Object.keys(symValJ).map((d) => `bookticker.${d}`);
-  ws.on("open", async () => {
-    console.log("Establishing all the required websocket connections.");
-    const chunkSize = 10;
-    const argChunks = subs
-      .map((d, i, arr) => (i % chunkSize ? "" : arr.slice(i, i + chunkSize)))
-      .filter((d) => d);
-    let ci = -1;
-    do {
-      ci++;
-      const args = argChunks[ci];
-      if (!args) break;
-      await delay(1000);
+const wsconnect = async () => {
+  try {
+    console.log(
+      "Establishing all the required websocket connections.Please wait..."
+    );
+    // CLEAR OLD DATA
+    if (ws) ws.terminate();
+    clearInterval(wspingTrigger);
+    clearTimeout(wsreconnectTrigger);
+
+    // GET SOCKET METADATA
+    const resp = await got.post("https://api.kucoin.com/api/v1/bullet-public");
+    const wsmeta = JSON.parse(resp.body);
+
+    //EXTRACT DATA
+    const wsToken = wsmeta?.data?.token;
+    const wsURLx = wsmeta?.data?.instanceServers?.[0]?.endpoint;
+    const wspingInterval = wsmeta?.data?.instanceServers?.[0]?.pingInterval;
+    const wspingTimeout =
+      wsmeta?.data?.instanceServers?.[0]?.pingTimeout + wspingInterval;
+    wsClientID = Math.floor(Math.random() * 10 ** 10);
+
+    //ESTABLISH CONNECTION
+    ws = new Websocket(`${wsURLx}?token=${wsToken}&[connectId=${wsClientID}]`);
+    ws.on("open", () => {
+      //subscribe
       ws.send(
         JSON.stringify({
-          op: "subscribe",
-          args,
+          id: wsClientID,
+          type: "subscribe",
+          topic: "/market/ticker:all",
+          privateChannel: false,
+          response: true,
         })
       );
-      const clen = subs.length - Math.min(subs.length, ci * chunkSize);
-      console.log(`${clen} more connections to go...`);
-    } while (true);
-    console.log("all connections established.");
-    console.log(
-      "Open http://127.0.0.1:3000/ in the browser to access the tool."
-    );
-  });
-  ws.on("error", log);
-  ws.on("message", processData);
 
-  setInterval(() => {
-    if (!(ws.readyState === Websocket.OPEN)) return;
-    ws.ping();
-  }, 20 * 1000);
+      console.log("all connections established.");
+      console.log(
+        "Open http://127.0.0.1:3000/ in the browser to access the tool."
+      );
+    });
+    ws.on("error", log);
+    ws.on("message", processData);
+    ws.on("pong", () => {
+      // log("PONG RECEIVED");
+      clearTimeout(wsreconnectTrigger);
+      wsreconnectTrigger = setTimeout(() => {
+        wsconnect();
+      }, wspingTimeout);
+    });
+
+    wspingTrigger = setInterval(() => {
+      ws.ping();
+    }, wspingInterval);
+  } catch (err) {
+    console.error(err);
+  }
 };
 
 module.exports = { getPairs, wsconnect, eventEmitter };
