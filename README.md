@@ -28,7 +28,7 @@ node index.js
 - Wait until the program loads
 - Then go to "http://127.0.0.1:3000/" url to access
 
-Still confused ? click [here](https://youtu.be/03wySxlklas) watch the youtube video.
+Still confused ? click [here](https://youtu.be/8w6vMmtLYkM) watch the youtube video.
 
 ### Disclaimer:
 
