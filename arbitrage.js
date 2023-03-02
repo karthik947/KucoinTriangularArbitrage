@@ -98,7 +98,7 @@ const getPairs = async () => {
   });
 
   log(
-    `Finished identifying all the paths. Total symbols = ${symbols.length}. Total paths = ${pairs.length}`
+    `Finished identifying all the paths. Total symbols = ${symbols.length}.Total Pairs = ${validPairs.length}. Total paths = ${pairs.length}`
   );
 };
 
